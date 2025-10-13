@@ -1,4 +1,4 @@
-FROM docker.io/golang:1.23.5 AS trivy_builder
+FROM docker.io/golang:1.24.4 AS trivy_builder
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
@@ -13,7 +13,7 @@ ENV CHROMIUM_FLAGS="--no-sandbox" \
     URL_PICARD_REPO="https://github.com/metabrainz/picard.git" \
     URL_CHROMAPRINT_REPO="https://github.com/acoustid/chromaprint.git" \
     URL_GOOGLETEST_REPO="https://github.com/google/googletest.git"
-    
+
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 COPY rootfs/ /
@@ -101,6 +101,19 @@ RUN set -x && \
     KEPT_PACKAGES+=(openbox) && \
     # Security updates / fix for issue #37 (https://github.com/mikenye/docker-picard/issues/37)
     TEMP_PACKAGES+=(jq) && \
+    # taglib dependencies
+    KEPT_PACKAGES+=(libcppunit-dev) && \
+    KEPT_PACKAGES+=(zlib1g-dev) && \
+    # rsgain dependencies
+    KEPT_PACKAGES+=(libebur128-dev) && \
+    KEPT_PACKAGES+=(libtag1-dev) && \ 
+    KEPT_PACKAGES+=(libavformat-dev) && \
+    KEPT_PACKAGES+=(libavcodec-dev) && \
+    KEPT_PACKAGES+=(libswresample-dev) && \
+    KEPT_PACKAGES+=(libavutil-dev) && \
+    KEPT_PACKAGES+=(libfmt-dev) && \
+    KEPT_PACKAGES+=(libinih-dev) && \
+    KEPT_PACKAGES+=(libutfcpp-dev) && \
     # Install packages
     apt-get update && \
     apt-get install -y --no-install-recommends \
@@ -211,6 +224,34 @@ RUN set -x && \
       /tmp/essentia-extractor-linux-x86_64.tar.gz \
       -C /usr/local/sbin \
       && \
+    # Build & install rsgain
+    # Get latest taglib version from tags
+    TAGLIB_TAG=$(git -c 'versionsort.suffix=-' ls-remote --tags https://github.com/taglib/taglib.git | tr -s ' ' | cut -d '/' -f 3 | grep -vi 'rc' | grep -vi 'beta' | grep -vi '\^{}' | sort -V | tail -1) && \
+    # Clone taglib repo
+    git clone --depth 1 --branch "$TAGLIB_TAG" https://github.com/taglib/taglib.git /src/taglib && \
+    # Build taglib
+    mkdir -p /src/taglib/build && \
+    pushd /src/taglib/build && \
+    cmake -DCMAKE_BUILD_TYPE=Release .. && \
+    make -j && \
+    make test && \
+    make install && \
+    ldconfig && \
+    popd && \
+    # Get latest rsgain version from tags
+    RSGAIN_TAG=$(git -c 'versionsort.suffix=-' ls-remote --tags https://github.com/complexlogic/rsgain.git | tr -s ' ' | cut -d '/' -f 3 | grep -vi 'rc' | grep -vi 'beta' | grep -vi '\^{}' | sort -V | tail -1) && \
+    # Clone rsgain repo
+    git clone --depth 1 --branch "$RSGAIN_TAG" https://github.com/complexlogic/rsgain.git /src/rsgain && \
+    # Build rsgain
+    mkdir -p /src/rsgain/build && \
+    pushd /src/rsgain/build && \
+    cmake .. -DCMAKE_BUILD_TYPE=Release && \
+    make -j && \
+    make install && \
+    ldconfig && \
+    popd && \
+    # Test rsgain
+    rsgain --version && \
     # Clean-up
     apt-get remove -y ${TEMP_PACKAGES[@]} && \
     apt-get autoremove -y && \
